@@ -2,9 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
 const vscode_1 = require("vscode");
-const node_1 = require("vscode-languageclient/node");
 const clarityCommandsProvider_1 = require("./clarityCommandsProvider");
 const clarityBlockEditorProvider_1 = require("./clarityBlockEditorProvider");
+const testGenerator_1 = require("./testGenerator");
 let client;
 // Clarity autocompletion provider
 class ClarityCompletionProvider {
@@ -137,39 +137,18 @@ async function isClarinetAvailable() {
     }
 }
 async function activate(context) {
-    // Check if Clarinet is available before starting LSP
+    // Temporarily disable LSP server to prevent crashes
+    // TODO: Re-enable LSP server once Clarinet LSP is stable
+    console.log('Clarity LSP server is temporarily disabled to prevent crashes');
+    console.log('Extension will work with custom autocompletion and other features');
+    // Check if Clarinet is available for CLI commands
     const clarinetAvailable = await isClarinetAvailable();
     if (!clarinetAvailable) {
-        console.warn('Clarinet is not available. LSP server will not be started.');
-        vscode_1.window.showWarningMessage('Clarinet is not installed or not in PATH. LSP features will be limited. Install Clarinet for full functionality.');
+        console.warn('Clarinet is not available. CLI commands will not work.');
+        vscode_1.window.showWarningMessage('Clarinet is not installed or not in PATH. CLI commands will not work. Install Clarinet for full functionality.');
     }
     else {
-        // Try to start LSP server, but don't fail if it's not available
-        try {
-            // Check if Clarinet is available
-            const command = 'clarinet';
-            const args = ['lsp']; // This starts the Clarity LSP server
-            const serverOptions = {
-                run: { command, args, transport: node_1.TransportKind.stdio },
-                debug: { command, args: ['lsp', '--debug'], transport: node_1.TransportKind.stdio }
-            };
-            const clientOptions = {
-                documentSelector: [{ scheme: 'file', language: 'clarity' }],
-                synchronize: { fileEvents: vscode_1.workspace.createFileSystemWatcher('**/*.clar') }
-            };
-            client = new node_1.LanguageClient('clarityLsp', 'Clarity LSP', serverOptions, clientOptions);
-            // Start the client and handle errors gracefully
-            client.start().catch(error => {
-                console.warn('Clarity LSP server failed to start:', error);
-                vscode_1.window.showWarningMessage('Clarity LSP server is not available. Autocompletion and other LSP features will be limited. Make sure Clarinet is installed and in your PATH.');
-            });
-            context.subscriptions.push(client);
-            console.log('Clarity LSP client started');
-        }
-        catch (error) {
-            console.warn('Failed to initialize Clarity LSP client:', error);
-            vscode_1.window.showWarningMessage('Clarity LSP server is not available. Autocompletion and other LSP features will be limited.');
-        }
+        console.log('Clarinet is available. CLI commands will work.');
     }
     // Register the completion provider
     console.log('Registering Clarity completion provider');
@@ -187,7 +166,7 @@ async function activate(context) {
     console.log('Clarity sidebar registered');
     // Register command handlers for Clarinet commands
     context.subscriptions.push(vscode_1.commands.registerCommand('clarity.generateTemplate', () => runClarinetCommand('clarinet new ./smart-contract')));
-    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.runTest', () => runClarinetCommand('clarinet test')));
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.runTest', () => generateAITests()));
     context.subscriptions.push(vscode_1.commands.registerCommand('clarity.runConsole', () => runClarinetCommand('clarinet console')));
     context.subscriptions.push(vscode_1.commands.registerCommand('clarity.runDeploy', () => runClarinetCommand('clarinet deploy')));
     // Register block editor commands
@@ -200,8 +179,10 @@ async function activate(context) {
 exports.activate = activate;
 function deactivate() {
     if (!client) {
+        console.log('No LSP client to stop');
         return undefined;
     }
+    console.log('Stopping LSP client');
     return client.stop();
 }
 exports.deactivate = deactivate;
@@ -250,5 +231,16 @@ function openBlockEditor() {
     vscode_1.commands.executeCommand('workbench.view.extension.clarity-sidebar');
     vscode_1.commands.executeCommand('workbench.view.extension.clarityBlockEditor');
     vscode_1.window.showInformationMessage('Block Editor opened! Drag and drop blocks to build your Clarity contract.');
+}
+// Helper function to generate AI-powered tests
+async function generateAITests() {
+    try {
+        const testGenerator = new testGenerator_1.TestGenerator();
+        await testGenerator.generateTests();
+    }
+    catch (error) {
+        console.error('Error generating AI tests:', error);
+        vscode_1.window.showErrorMessage(`Failed to generate AI tests: ${error}`);
+    }
 }
 //# sourceMappingURL=extension.js.map

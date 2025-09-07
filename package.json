@@ -14,20 +14,25 @@
   ],
   "contributes": {
     "viewsContainers": {
-      "activitybar": [{
-        "id": "clarity-sidebar",
-        "title": "Clarity",
-        "icon": "$(symbol-method)"
-      }]
+      "activitybar": [
+        {
+          "id": "clarity-sidebar",
+          "title": "Clarity",
+          "icon": "$(symbol-method)"
+        }
+      ]
     },
     "views": {
-      "clarity-sidebar": [{
-        "id": "clarityCommands",
-        "name": "Commands"
-      }, {
-        "id": "clarityBlockEditor",
-        "name": "Block Editor"
-      }]
+      "clarity-sidebar": [
+        {
+          "id": "clarityCommands",
+          "name": "Commands"
+        },
+        {
+          "id": "clarityBlockEditor",
+          "name": "Block Editor"
+        }
+      ]
     },
     "commands": [
       {
@@ -82,11 +87,13 @@
       }
     ],
     "menus": {
-      "view/title": [{
-        "command": "clarity.refreshCommands",
-        "when": "view == clarityCommands",
-        "group": "navigation"
-      }]
+      "view/title": [
+        {
+          "command": "clarity.refreshCommands",
+          "when": "view == clarityCommands",
+          "group": "navigation"
+        }
+      ]
     },
     "configuration": {
       "title": "Clarity",
@@ -95,6 +102,11 @@
           "type": "string",
           "default": "clarinet",
           "description": "Path to Clarinet executable"
+        },
+        "clarity.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API Key for AI-powered test generation"
         }
       }
     },
@@ -132,11 +144,13 @@
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-    "@types/vscode": "^1.103.0",
     "@types/node": "16.x",
+    "@types/vscode": "^1.103.0",
     "typescript": "^4.9.4"
   },
   "dependencies": {
+    "dotenv": "^17.2.2",
+    "openai": "^4.20.1",
     "vscode-languageclient": "^9.0.1"
   }
 }
