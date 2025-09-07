@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
 const vscode_1 = require("vscode");
 const node_1 = require("vscode-languageclient/node");
+const clarityCommandsProvider_1 = require("./clarityCommandsProvider");
+const clarityBlockEditorProvider_1 = require("./clarityBlockEditorProvider");
 let client;
 // Clarity autocompletion provider
 class ClarityCompletionProvider {
@@ -120,27 +122,80 @@ class ClarityCompletionProvider {
         return completions;
     }
 }
-function activate(context) {
-    // Assume Clarinet is in PATH; adjust if needed
-    const command = 'clarinet';
-    const args = ['lsp']; // This starts the Clarity LSP server (confirm in Clarinet docs if not exact)
-    const serverOptions = {
-        run: { command, args, transport: node_1.TransportKind.stdio },
-        debug: { command, args: ['lsp', '--debug'], transport: node_1.TransportKind.stdio }
-    };
-    const clientOptions = {
-        documentSelector: [{ scheme: 'file', language: 'clarity' }],
-        synchronize: { fileEvents: vscode_1.workspace.createFileSystemWatcher('**/*.clar') }
-    };
-    client = new node_1.LanguageClient('clarityLsp', 'Clarity LSP', serverOptions, clientOptions);
-    client.start();
-    context.subscriptions.push(client);
+// Helper function to check if Clarinet is available
+async function isClarinetAvailable() {
+    try {
+        const { exec } = require('child_process');
+        return new Promise((resolve) => {
+            exec('clarinet --version', (error) => {
+                resolve(!error);
+            });
+        });
+    }
+    catch {
+        return false;
+    }
+}
+async function activate(context) {
+    // Check if Clarinet is available before starting LSP
+    const clarinetAvailable = await isClarinetAvailable();
+    if (!clarinetAvailable) {
+        console.warn('Clarinet is not available. LSP server will not be started.');
+        vscode_1.window.showWarningMessage('Clarinet is not installed or not in PATH. LSP features will be limited. Install Clarinet for full functionality.');
+    }
+    else {
+        // Try to start LSP server, but don't fail if it's not available
+        try {
+            // Check if Clarinet is available
+            const command = 'clarinet';
+            const args = ['lsp']; // This starts the Clarity LSP server
+            const serverOptions = {
+                run: { command, args, transport: node_1.TransportKind.stdio },
+                debug: { command, args: ['lsp', '--debug'], transport: node_1.TransportKind.stdio }
+            };
+            const clientOptions = {
+                documentSelector: [{ scheme: 'file', language: 'clarity' }],
+                synchronize: { fileEvents: vscode_1.workspace.createFileSystemWatcher('**/*.clar') }
+            };
+            client = new node_1.LanguageClient('clarityLsp', 'Clarity LSP', serverOptions, clientOptions);
+            // Start the client and handle errors gracefully
+            client.start().catch(error => {
+                console.warn('Clarity LSP server failed to start:', error);
+                vscode_1.window.showWarningMessage('Clarity LSP server is not available. Autocompletion and other LSP features will be limited. Make sure Clarinet is installed and in your PATH.');
+            });
+            context.subscriptions.push(client);
+            console.log('Clarity LSP client started');
+        }
+        catch (error) {
+            console.warn('Failed to initialize Clarity LSP client:', error);
+            vscode_1.window.showWarningMessage('Clarity LSP server is not available. Autocompletion and other LSP features will be limited.');
+        }
+    }
     // Register the completion provider
     console.log('Registering Clarity completion provider');
     const completionProvider = new ClarityCompletionProvider();
     const disposable = vscode_1.languages.registerCompletionItemProvider('clarity', completionProvider);
     context.subscriptions.push(disposable);
     console.log('Clarity completion provider registered');
+    // Register the sidebar tree view providers
+    console.log('Registering Clarity sidebar');
+    const clarityCommandsProvider = new clarityCommandsProvider_1.ClarityCommandsProvider();
+    const clarityBlockEditorProvider = new clarityBlockEditorProvider_1.ClarityBlockEditorProvider();
+    vscode_1.window.registerTreeDataProvider('clarityCommands', clarityCommandsProvider);
+    vscode_1.window.registerTreeDataProvider('clarityBlockEditor', clarityBlockEditorProvider);
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.refreshCommands', () => clarityCommandsProvider.refresh()));
+    console.log('Clarity sidebar registered');
+    // Register command handlers for Clarinet commands
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.generateTemplate', () => runClarinetCommand('clarinet new ./smart-contract')));
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.runTest', () => runClarinetCommand('clarinet test')));
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.runConsole', () => runClarinetCommand('clarinet console')));
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.runDeploy', () => runClarinetCommand('clarinet deploy')));
+    // Register block editor commands
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.addBlock', (type) => clarityBlockEditorProvider.addBlock(type)));
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.generateCode', () => generateCodeFromBlocks(clarityBlockEditorProvider)));
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.clearBlocks', () => clarityBlockEditorProvider.clearBlocks()));
+    context.subscriptions.push(vscode_1.commands.registerCommand('clarity.openBlockEditor', () => openBlockEditor()));
+    console.log('Clarity commands registered');
 }
 exports.activate = activate;
 function deactivate() {
@@ -150,4 +205,50 @@ function deactivate() {
     return client.stop();
 }
 exports.deactivate = deactivate;
+// Helper function to run Clarinet commands
+async function runClarinetCommand(cmd) {
+    // Check if a workspace is open (Clarinet expects a project folder)
+    if (!vscode_1.workspace.workspaceFolders || vscode_1.workspace.workspaceFolders.length === 0) {
+        vscode_1.window.showErrorMessage('Open a Clarity project folder first.');
+        return;
+    }
+    // Get Clarinet path from settings
+    const clarinetPath = vscode_1.workspace.getConfiguration('clarity').get('clarinetPath');
+    const fullCommand = cmd.replace('clarinet', clarinetPath);
+    // Create or reuse a terminal
+    const terminalName = 'Clarity Commands';
+    let terminal = vscode_1.window.terminals.find(t => t.name === terminalName);
+    if (!terminal) {
+        terminal = vscode_1.window.createTerminal(terminalName);
+    }
+    terminal.show();
+    // Change to the project directory and run the command
+    const projectPath = vscode_1.workspace.workspaceFolders[0].uri.fsPath;
+    terminal.sendText(`cd "${projectPath}"`);
+    terminal.sendText(fullCommand);
+    // Show a message to the user
+    vscode_1.window.showInformationMessage(`Running: ${fullCommand}`);
+}
+// Helper function to generate code from blocks
+async function generateCodeFromBlocks(blockEditorProvider) {
+    const generatedCode = blockEditorProvider.generateCode();
+    if (!generatedCode.trim()) {
+        vscode_1.window.showWarningMessage('No blocks to generate code from. Add some blocks first!');
+        return;
+    }
+    // Show the generated code in a new document
+    const doc = await vscode_1.workspace.openTextDocument({
+        content: generatedCode,
+        language: 'clarity'
+    });
+    await vscode_1.window.showTextDocument(doc);
+    vscode_1.window.showInformationMessage('Generated Clarity code opened in new document!');
+}
+// Helper function to open block editor
+function openBlockEditor() {
+    // Focus on the block editor view
+    vscode_1.commands.executeCommand('workbench.view.extension.clarity-sidebar');
+    vscode_1.commands.executeCommand('workbench.view.extension.clarityBlockEditor');
+    vscode_1.window.showInformationMessage('Block Editor opened! Drag and drop blocks to build your Clarity contract.');
+}
 //# sourceMappingURL=extension.js.map
