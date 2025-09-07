@@ -1,4 +1,6 @@
-import { workspace, ExtensionContext, CompletionItemProvider, CompletionItem, CompletionItemKind, TextDocument, Position, CancellationToken, CompletionContext, SnippetString, MarkdownString, languages, window, commands, Terminal } from 'vscode';
+import { workspace, ExtensionContext, CompletionItemProvider, CompletionItem, CompletionItemKind, TextDocument, Position, CancellationToken, CompletionContext, SnippetString, MarkdownString, languages, window, commands, Terminal, env } from 'vscode';
+import { readFileSync } from 'fs';
+import { basename } from 'path';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 import { ClarityCommandsProvider } from './clarityCommandsProvider';
 import { ClarityBlockEditorProvider } from './clarityBlockEditorProvider';
@@ -163,7 +165,6 @@ export async function activate(context: ExtensionContext) {
   // Temporarily disable LSP server to prevent crashes
   // TODO: Re-enable LSP server once Clarinet LSP is stable
   console.log('Clarity LSP server is temporarily disabled to prevent crashes');
-  console.log('Extension will work with custom autocompletion and other features');
   
   // Check if Clarinet is available for CLI commands
   const clarinetAvailable = await isClarinetAvailable();
@@ -197,7 +198,8 @@ export async function activate(context: ExtensionContext) {
   context.subscriptions.push(commands.registerCommand('clarity.generateTemplate', () => runClarinetCommand('clarinet new ./smart-contract')));
   context.subscriptions.push(commands.registerCommand('clarity.runTest', () => generateAITests()));
   context.subscriptions.push(commands.registerCommand('clarity.runConsole', () => runClarinetCommand('clarinet console')));
-  context.subscriptions.push(commands.registerCommand('clarity.runDeploy', () => runClarinetCommand('clarinet deploy')));
+  context.subscriptions.push(commands.registerCommand('clarity.generateDeployment', () => generateDeployment()));
+  context.subscriptions.push(commands.registerCommand('clarity.runDeploy', () => testIndividualFunctions()));
   
   // Register block editor commands
   context.subscriptions.push(commands.registerCommand('clarity.addBlock', (type: string) => clarityBlockEditorProvider.addBlock(type)));
@@ -246,6 +248,44 @@ async function runClarinetCommand(cmd: string) {
   window.showInformationMessage(`Running: ${fullCommand}`);
 }
 
+// Helper function to run Clarinet commands with input
+async function runClarinetCommandWithInput(cmd: string, inputCommand: string) {
+  // Check if a workspace is open (Clarinet expects a project folder)
+  if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
+    window.showErrorMessage('Open a Clarity project folder first.');
+    return;
+  }
+
+  // Get Clarinet path from settings
+  const clarinetPath = workspace.getConfiguration('clarity').get('clarinetPath') as string;
+  const fullCommand = cmd.replace('clarinet', clarinetPath);
+
+  // Create or reuse a terminal
+  const terminalName = 'Clarity Console';
+  let terminal = window.terminals.find(t => t.name === terminalName);
+  if (!terminal) {
+    terminal = window.createTerminal(terminalName);
+  }
+  terminal.show();
+
+  // Change to the project directory and run the command
+  const projectPath = workspace.workspaceFolders[0].uri.fsPath;
+  
+  // Send commands with proper timing
+  terminal.sendText(`cd "${projectPath}" && ${fullCommand}`);
+  
+  // Wait for the console to start, then send the input command
+  setTimeout(() => {
+    if (terminal) {
+      console.log('Sending command to terminal:', inputCommand);
+      // Send the command with proper formatting and escaping
+      terminal.sendText(inputCommand);
+      // Send Enter to execute the command
+      terminal.sendText('\r');
+    }
+  }, 5000);
+}
+
 // Helper function to generate code from blocks
 async function generateCodeFromBlocks(blockEditorProvider: ClarityBlockEditorProvider) {
   const generatedCode = blockEditorProvider.generateCode();
@@ -282,4 +322,371 @@ async function generateAITests() {
     console.error('Error generating AI tests:', error);
     window.showErrorMessage(`Failed to generate AI tests: ${error}`);
   }
+}
+
+// Helper function to generate Clarinet deployment
+async function generateDeployment() {
+  // Check if a workspace is open
+  if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
+    window.showErrorMessage('Open a Clarity project folder first.');
+    return;
+  }
+
+  // Show network selection dialog
+  const networks = [
+    { label: 'Mainnet', value: 'mainnet' },
+    { label: 'Testnet', value: 'testnet' },
+    { label: 'Devnet', value: 'devnet' },
+    { label: 'Local', value: 'local' }
+  ];
+
+  const selectedNetwork = await window.showQuickPick(networks, {
+    placeHolder: 'Select network for deployment generation',
+    title: 'Generate Clarinet Deployment'
+  });
+
+  if (!selectedNetwork) {
+    return;
+  }
+
+  // Run the deployment generation command
+  const command = `clarinet deployments generate --${selectedNetwork.value}`;
+  await runClarinetCommand(command);
+}
+
+// Helper function to test individual functions
+async function testIndividualFunctions() {
+  // Check if a workspace is open
+  if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
+    window.showErrorMessage('Open a Clarity project folder first.');
+    return;
+  }
+
+  try {
+    // Find all .clar files
+    const clarFiles = await workspace.findFiles('**/*.clar');
+    
+    if (clarFiles.length === 0) {
+      window.showWarningMessage('No .clar files found in the workspace.');
+      return;
+    }
+
+    // Parse functions from all .clar files
+    const allFunctions: FunctionInfo[] = [];
+    
+    for (const file of clarFiles) {
+      const content = readFileSync(file.fsPath, 'utf8');
+      const functions = parseClarityFunctions(content, file.fsPath);
+      allFunctions.push(...functions);
+    }
+
+    if (allFunctions.length === 0) {
+      window.showWarningMessage('No functions found in .clar files.');
+      return;
+    }
+
+    // Show function selection
+    const functionItems = allFunctions.map(func => ({
+      label: func.name,
+      description: `${func.contractName} - ${func.type}`,
+      detail: func.signature,
+      function: func
+    }));
+
+    const selectedFunction = await window.showQuickPick(functionItems, {
+      placeHolder: 'Select a function to test',
+      title: 'Test Individual Function'
+    });
+
+    if (!selectedFunction) {
+      return;
+    }
+
+    // Test the selected function
+    await testFunction(selectedFunction.function);
+
+  } catch (error) {
+    console.error('Error testing functions:', error);
+    window.showErrorMessage(`Failed to test functions: ${error}`);
+  }
+}
+
+// Interface for function information
+interface FunctionInfo {
+  name: string;
+  type: 'public' | 'private' | 'read-only';
+  contractName: string;
+  parameters: ParameterInfo[];
+  signature: string;
+  filePath: string;
+}
+
+interface ParameterInfo {
+  name: string;
+  type: string;
+}
+
+// Parse Clarity functions from file content
+function parseClarityFunctions(content: string, filePath: string): FunctionInfo[] {
+  const functions: FunctionInfo[] = [];
+  const contractName = basename(filePath, '.clar');
+  
+  // Regex patterns for different function types
+  const patterns = [
+    {
+      type: 'public' as const,
+      regex: /\(define-public\s+\(([^\s)]+)\s+([^)]+)\)/g
+    },
+    {
+      type: 'private' as const,
+      regex: /\(define-private\s+\(([^\s)]+)\s+([^)]+)\)/g
+    },
+    {
+      type: 'read-only' as const,
+      regex: /\(define-read-only\s+\(([^\s)]+)\s+([^)]+)\)/g
+    }
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.regex.exec(content)) !== null) {
+      const functionName = match[1].trim();
+      const parametersStr = match[2].trim();
+      
+      // Parse parameters
+      const parameters = parseParameters(parametersStr);
+      
+      // Create signature
+      const signature = `(${functionName} ${parametersStr})`;
+      
+      functions.push({
+        name: functionName,
+        type: pattern.type,
+        contractName,
+        parameters,
+        signature,
+        filePath
+      });
+    }
+  }
+
+  return functions;
+}
+
+// Parse function parameters
+function parseParameters(parametersStr: string): ParameterInfo[] {
+  console.log('Parsing parameters from:', parametersStr);
+  
+  if (!parametersStr || parametersStr === '()') {
+    return [];
+  }
+
+  const parameters: ParameterInfo[] = [];
+  
+  // Handle parameters in format: (amount uint) or (from principal) (amount uint)
+  // First try to match individual parameter groups like (amount uint)
+  const paramMatches = parametersStr.match(/\(([^)]+)\s+([^)]+)\)/g);
+  console.log('Param matches:', paramMatches);
+  
+  if (paramMatches) {
+    for (const match of paramMatches) {
+      const paramContent = match.slice(1, -1); // Remove outer parentheses
+      const parts = paramContent.split(/\s+/);
+      if (parts.length >= 2) {
+        const name = parts[0].trim();
+        const type = parts.slice(1).join(' ').trim(); // Join remaining parts as type
+        parameters.push({ name, type });
+        console.log('Parsed parameter:', { name, type });
+      }
+    }
+  } else {
+    // Handle single parameter without parentheses like: amount uint
+    const singleParamMatch = parametersStr.match(/^(\w+)\s+(\w+)$/);
+    if (singleParamMatch) {
+      const name = singleParamMatch[1].trim();
+      const type = singleParamMatch[2].trim();
+      parameters.push({ name, type });
+      console.log('Parsed single parameter:', { name, type });
+    } else {
+      // Fallback for simple parameters
+      const paramPairs = parametersStr.match(/(\w+)\s+(\w+)/g);
+      console.log('Simple param pairs:', paramPairs);
+      if (paramPairs) {
+        for (const pair of paramPairs) {
+          const [name, type] = pair.split(/\s+/);
+          parameters.push({ name: name.trim(), type: type.trim() });
+          console.log('Parsed simple parameter:', { name, type });
+        }
+      }
+    }
+  }
+
+  console.log('Final parameters:', parameters);
+  return parameters;
+}
+
+// Test a specific function
+async function testFunction(func: FunctionInfo) {
+  try {
+    console.log('Testing function:', func);
+    
+    // Show parameter input dialog
+    const parameterValues = await getParameterValues(func);
+    
+    if (parameterValues === undefined) {
+      return; // User cancelled
+    }
+
+    console.log('Parameter values:', parameterValues);
+
+    // Create test command and alternatives
+    const testCommand = createTestCommand(func, parameterValues);
+    const alternativeCommands = getAlternativeCommands(func, parameterValues);
+    console.log('Test command:', testCommand);
+    console.log('Alternative commands:', alternativeCommands);
+    
+    // Show the command to the user and let them choose
+    const action = await window.showInformationMessage(
+      `Test Command:\n${testCommand}\n\nAlternative Commands to try:\n${alternativeCommands.slice(1).map((cmd, i) => `${i + 2}. ${cmd}`).join('\n')}\n\nNote: If you get "unresolved contract" errors:\n1. Type "::help" in Clarinet console to see available contracts\n2. Type "::contracts" to list contracts\n3. Check the contract name in your Clarinet.toml file\n\nChoose an action:`,
+      'Open Console & Auto-Send',
+      'Open Console Only',
+      'Copy Command',
+      'Show All Commands',
+      'Show Help Commands'
+    );
+
+    if (action === 'Open Console & Auto-Send') {
+      await runClarinetCommandWithInput('clarinet console', testCommand);
+    } else if (action === 'Open Console Only') {
+      await runClarinetCommand('clarinet console');
+      // Show the command again after console opens
+      setTimeout(() => {
+        window.showInformationMessage(`Paste this command in the console:\n${testCommand}`);
+      }, 2000);
+    } else if (action === 'Copy Command') {
+      await env.clipboard.writeText(testCommand);
+      window.showInformationMessage('Command copied to clipboard!');
+    } else if (action === 'Show All Commands') {
+      const allCommands = alternativeCommands.join('\n');
+      await env.clipboard.writeText(allCommands);
+      window.showInformationMessage(`All commands copied to clipboard!\n\n${allCommands}`);
+    } else if (action === 'Show Help Commands') {
+      const helpCommands = [
+        '::help',
+        '::contracts',
+        '::mint',
+        '::mint-asset',
+        '::mint-token',
+        '::deploy',
+        '::deploy-contract'
+      ].join('\n');
+      await env.clipboard.writeText(helpCommands);
+      window.showInformationMessage(`Help commands copied to clipboard!\n\n${helpCommands}\n\nPaste these in the Clarinet console to discover available contracts.`);
+    }
+    
+  } catch (error) {
+    console.error('Error testing function:', error);
+    window.showErrorMessage(`Failed to test function: ${error}`);
+  }
+}
+
+// Get parameter values from user
+async function getParameterValues(func: FunctionInfo): Promise<string[] | undefined> {
+  if (func.parameters.length === 0) {
+    // No parameters, just run the function
+    return [];
+  }
+
+  const parameterValues: string[] = [];
+  
+  for (const param of func.parameters) {
+    const value = await window.showInputBox({
+      prompt: `Enter value for parameter: ${param.name} (${param.type})`,
+      placeHolder: `e.g., ${getExampleValue(param.type)}`,
+      validateInput: (value) => validateParameterValue(value, param.type)
+    });
+
+    if (value === undefined) {
+      return undefined; // User cancelled
+    }
+
+    parameterValues.push(value);
+  }
+
+  return parameterValues;
+}
+
+// Get example value for parameter type
+function getExampleValue(type: string): string {
+  const examples: { [key: string]: string } = {
+    'uint': 'u100',
+    'int': 'i100',
+    'bool': 'true',
+    'string-ascii': '"hello"',
+    'string-utf8': 'u"hello"',
+    'principal': 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM',
+    'list': '(list u1 u2 u3)',
+    'tuple': '(tuple (key "value"))',
+    'optional': '(some u100)',
+    'response': '(ok u100)'
+  };
+
+  return examples[type] || 'value';
+}
+
+// Validate parameter value
+function validateParameterValue(value: string, type: string): string | undefined {
+  if (!value.trim()) {
+    return 'Parameter value cannot be empty';
+  }
+
+  // Basic validation based on type
+  switch (type) {
+    case 'uint':
+      if (!value.match(/^u\d+$/)) {
+        return 'Invalid uint format. Use: u123';
+      }
+      break;
+    case 'int':
+      if (!value.match(/^i-?\d+$/)) {
+        return 'Invalid int format. Use: i123 or i-123';
+      }
+      break;
+    case 'bool':
+      if (!['true', 'false'].includes(value)) {
+        return 'Invalid bool format. Use: true or false';
+      }
+      break;
+    case 'string-ascii':
+      if (!value.startsWith('"') || !value.endsWith('"')) {
+        return 'Invalid string-ascii format. Use: "hello"';
+      }
+      break;
+    case 'string-utf8':
+      if (!value.startsWith('u"') || !value.endsWith('"')) {
+        return 'Invalid string-utf8 format. Use: u"hello"';
+      }
+      break;
+  }
+
+  return undefined;
+}
+
+// Create test command for the function
+function createTestCommand(func: FunctionInfo, parameterValues: string[]): string {
+  const paramStr = parameterValues.length > 0 ? ` ${parameterValues.join(' ')}` : '';
+  // Use the correct Clarinet console syntax with dot notation
+  return `(contract-call? .${func.contractName} ${func.name}${paramStr})`;
+}
+
+// Helper function to get alternative command formats
+function getAlternativeCommands(func: FunctionInfo, parameterValues: string[]): string[] {
+  const paramStr = parameterValues.length > 0 ? ` ${parameterValues.join(' ')}` : '';
+  return [
+    `(contract-call? .${func.contractName} ${func.name}${paramStr})`,
+    `(${func.name}${paramStr})`,
+    `(contract-call? '${func.contractName} ${func.name}${paramStr})`,
+    `(contract-call? .${func.contractName.toLowerCase()} ${func.name}${paramStr})`,
+    `(contract-call? .${func.contractName.toUpperCase()} ${func.name}${paramStr})`
+  ];
 }

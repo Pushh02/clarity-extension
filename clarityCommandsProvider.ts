@@ -22,7 +22,8 @@ export class ClarityCommandsProvider implements TreeDataProvider<TreeItem> {
       this.createCommandItem('Generate Template', 'clarity.generateTemplate', 'Generates a template for a new contract', 'terminal'),
       this.createCommandItem('Generate Tests', 'clarity.runTest', 'Runs contract tests', 'beaker'),
       this.createCommandItem('Run Console', 'clarity.runConsole', 'Opens interactive REPL', 'terminal'),
-      this.createCommandItem('Deploy', 'clarity.runDeploy', 'Deploys contracts', 'rocket'),
+      this.createCommandItem('Test Functions', 'clarity.runDeploy', 'Test individual functions with parameters', 'beaker'),
+      this.createCommandItem('Generate Deployment', 'clarity.generateDeployment', 'Generates deployment configuration for specific network', 'gear'),
       this.createSeparatorItem(),
       this.createInfoItem('Clarity Commands', 'Click any command to run it in the terminal')
     ];

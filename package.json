@@ -66,6 +66,11 @@
         "icon": "$(rocket)"
       },
       {
+        "command": "clarity.generateDeployment",
+        "title": "Generate Deployment",
+        "icon": "$(gear)"
+      },
+      {
         "command": "clarity.refreshCommands",
         "title": "Refresh",
         "icon": "$(refresh)"
