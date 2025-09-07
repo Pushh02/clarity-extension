@@ -1,0 +1,173 @@
+{
+  "Clarity Contract Template": {
+    "prefix": "contract",
+    "body": [
+      ";; ${1:Contract description}",
+      "",
+      ";; Define constants",
+      "(define-constant CONTRACT-OWNER tx-sender)",
+      "",
+      ";; Define data variables",
+      "(define-data-var ${2:variable-name} ${3:type} ${4:initial-value})",
+      "",
+      ";; Define maps",
+      "(define-map ${5:map-name} ${6:key-type} ${7:value-type})",
+      "",
+      ";; Define public functions",
+      "(define-public (${8:function-name} (${9:param1} ${10:param-type}))",
+      "  (begin",
+      "    ${11:; function body}",
+      "    (ok ${12:return-value})",
+      "  )",
+      ")",
+      "",
+      ";; Define read-only functions",
+      "(define-read-only (${13:read-function-name} (${14:param} ${15:param-type}))",
+      "  ${16:; read-only function body}",
+      ")"
+    ],
+    "description": "Complete Clarity contract template"
+  },
+  "Define Public Function": {
+    "prefix": "defpub",
+    "body": [
+      "(define-public (${1:function-name} (${2:param1} ${3:param-type}))",
+      "  (begin",
+      "    ${4:; function body}",
+      "    (ok ${5:return-value})",
+      "  )",
+      ")"
+    ],
+    "description": "Define a public function"
+  },
+  "Define Private Function": {
+    "prefix": "defpriv",
+    "body": [
+      "(define-private (${1:function-name} (${2:param1} ${3:param-type}))",
+      "  ${4:; function body}",
+      ")"
+    ],
+    "description": "Define a private function"
+  },
+  "Define Read-Only Function": {
+    "prefix": "defread",
+    "body": [
+      "(define-read-only (${1:function-name} (${2:param1} ${3:param-type}))",
+      "  ${4:; read-only function body}",
+      ")"
+    ],
+    "description": "Define a read-only function"
+  },
+  "If Statement": {
+    "prefix": "if",
+    "body": [
+      "(if ${1:condition}",
+      "  ${2:then-expression}",
+      "  ${3:else-expression}",
+      ")"
+    ],
+    "description": "If conditional expression"
+  },
+  "When Statement": {
+    "prefix": "when",
+    "body": [
+      "(when ${1:condition}",
+      "  ${2:then-expression}",
+      ")"
+    ],
+    "description": "When conditional expression"
+  },
+  "Match Statement": {
+    "prefix": "match",
+    "body": [
+      "(match ${1:value}",
+      "  ${2:pattern1} ${3:expression1}",
+      "  ${4:pattern2} ${5:expression2}",
+      ")"
+    ],
+    "description": "Pattern matching"
+  },
+  "Define Data Variable": {
+    "prefix": "defvar",
+    "body": [
+      "(define-data-var ${1:variable-name} ${2:type} ${3:initial-value})"
+    ],
+    "description": "Define a data variable"
+  },
+  "Define Map": {
+    "prefix": "defmap",
+    "body": [
+      "(define-map ${1:map-name} ${2:key-type} ${3:value-type})"
+    ],
+    "description": "Define a map"
+  },
+  "Define Constant": {
+    "prefix": "defconst",
+    "body": [
+      "(define-constant ${1:CONSTANT-NAME} ${2:value})"
+    ],
+    "description": "Define a constant"
+  },
+  "Define Trait": {
+    "prefix": "deftrait",
+    "body": [
+      "(define-trait ${1:trait-name}",
+      "  (${2:function-name} (${3:param1} ${4:param-type}) ${5:return-type})",
+      ")"
+    ],
+    "description": "Define a trait"
+  },
+  "Define Fungible Token": {
+    "prefix": "defft",
+    "body": [
+      "(define-fungible-token ${1:token-name})"
+    ],
+    "description": "Define a fungible token"
+  },
+  "Define Non-Fungible Token": {
+    "prefix": "defnft",
+    "body": [
+      "(define-non-fungible-token ${1:token-name})"
+    ],
+    "description": "Define a non-fungible token"
+  },
+  "Begin Block": {
+    "prefix": "begin",
+    "body": [
+      "(begin",
+      "  ${1:; expressions}",
+      ")"
+    ],
+    "description": "Begin block for multiple expressions"
+  },
+  "Let Statement": {
+    "prefix": "let",
+    "body": [
+      "(let ((${1:variable} ${2:value}))",
+      "  ${3:; body}",
+      ")"
+    ],
+    "description": "Let binding"
+  },
+  "Try Retry": {
+    "prefix": "try",
+    "body": [
+      "(try! ${1:expression})"
+    ],
+    "description": "Try retry expression"
+  },
+  "Assert": {
+    "prefix": "assert",
+    "body": [
+      "(asserts! ${1:condition} ${2:error-code})"
+    ],
+    "description": "Assert condition"
+  },
+  "Comment": {
+    "prefix": "comment",
+    "body": [
+      ";; ${1:comment text}"
+    ],
+    "description": "Add a comment"
+  }
+}

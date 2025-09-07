@@ -1,33 +1,54 @@
 {
-  "name": "thew3extension",
-  "displayName": "theW3extension",
-  "description": "",
+  "name": "clarity-clean",
+  "displayName": "clarity clean",
+  "description": "Clarity clean helps you write the clean clarity code with visual buttons and maps or the greater clarity.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.103.0"
   },
   "categories": [
-    "Other"
+    "Programming Languages"
   ],
-  "activationEvents": [],
-  "main": "./extension.js",
   "contributes": {
-    "commands": [{
-      "command": "thew3extension.helloWorld",
-      "title": "Hello World"
-    }]
+    "languages": [
+      {
+        "id": "clarity",
+        "aliases": [
+          "clarity",
+          "clarity"
+        ],
+        "extensions": [
+          ".clar"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "clarity",
+        "scopeName": "\\source.clarity",
+        "path": "./syntaxes/clarity.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "clarity",
+        "path": "./snippets/clarity.json"
+      }
+    ]
   },
+  "main": "./out/extension.js",
   "scripts": {
-    "lint": "eslint .",
-    "pretest": "npm run lint",
-    "test": "vscode-test"
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
     "@types/vscode": "^1.103.0",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "eslint": "^9.34.0",
-    "@vscode/test-cli": "^0.0.11",
-    "@vscode/test-electron": "^2.5.2"
+    "@types/node": "16.x",
+    "typescript": "^4.9.4"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   }
 }
