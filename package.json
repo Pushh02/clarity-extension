@@ -89,6 +89,16 @@
         "command": "clarity.clearBlocks",
         "title": "Clear All Blocks",
         "icon": "$(trash)"
+      },
+      {
+        "command": "clarity.clearDiagnostics",
+        "title": "Clear Diagnostics",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "clarity.checkDiagnostics",
+        "title": "Check Diagnostics",
+        "icon": "$(check)"
       }
     ],
     "menus": {
@@ -157,5 +167,8 @@
     "dotenv": "^17.2.2",
     "openai": "^4.20.1",
     "vscode-languageclient": "^9.0.1"
-  }
+  },
+  "extensionDependencies": [
+    "hirosystems.clarity-lsp"  
+  ]
 }

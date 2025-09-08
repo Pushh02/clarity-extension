@@ -1,9 +1,10 @@
-import { workspace, ExtensionContext, CompletionItemProvider, CompletionItem, CompletionItemKind, TextDocument, Position, CancellationToken, CompletionContext, SnippetString, MarkdownString, languages, window, commands, Terminal, env } from 'vscode';
+import { workspace, ExtensionContext, CompletionItemProvider, CompletionItem, CompletionItemKind, TextDocument, Position, CancellationToken, CompletionContext, SnippetString, MarkdownString, languages, window, commands, Terminal, env, Uri } from 'vscode';
 import { readFileSync } from 'fs';
-import { basename } from 'path';
+import { basename, join as pathJoin } from 'path';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 import { ClarityCommandsProvider } from './clarityCommandsProvider';
 import { ClarityBlockEditorProvider } from './clarityBlockEditorProvider';
+import { ClarityDiagnosticProvider } from './clarityDiagnosticProvider';
 import { TestGenerator } from './testGenerator';
 
 let client: LanguageClient | undefined;
@@ -183,6 +184,35 @@ export async function activate(context: ExtensionContext) {
   context.subscriptions.push(disposable);
   console.log('Clarity completion provider registered');
   
+  // Register the diagnostic provider for syntax error detection
+  console.log('Registering Clarity diagnostic provider');
+  const diagnosticProvider = new ClarityDiagnosticProvider();
+  diagnosticProvider.activate(context);
+  context.subscriptions.push(diagnosticProvider);
+  
+  // Register command to clear diagnostics
+  const clearDiagnosticsCommand = commands.registerCommand('clarity.clearDiagnostics', () => {
+    const activeEditor = window.activeTextEditor;
+    if (activeEditor && activeEditor.document.languageId === 'clarity') {
+      diagnosticProvider.clearDiagnostics(activeEditor.document);
+      window.showInformationMessage('Clarity diagnostics cleared');
+    }
+  });
+  context.subscriptions.push(clearDiagnosticsCommand);
+  
+  // Register command to manually check diagnostics
+  const checkDiagnosticsCommand = commands.registerCommand('clarity.checkDiagnostics', () => {
+    const activeEditor = window.activeTextEditor;
+    if (activeEditor && activeEditor.document.languageId === 'clarity') {
+      // Access the private method through any
+      (diagnosticProvider as any).checkSyntax(activeEditor.document);
+      window.showInformationMessage('Clarity diagnostics checked');
+    }
+  });
+  context.subscriptions.push(checkDiagnosticsCommand);
+  
+  console.log('Clarity diagnostic provider registered');
+  
   // Register the sidebar tree view providers
   console.log('Registering Clarity sidebar');
   const clarityCommandsProvider = new ClarityCommandsProvider();
@@ -274,14 +304,23 @@ async function runClarinetCommandWithInput(cmd: string, inputCommand: string) {
   // Send commands with proper timing
   terminal.sendText(`cd "${projectPath}" && ${fullCommand}`);
   
-  // Wait for the console to start, then send the input command
+  // Wait for the console to start, then send the input commands
   setTimeout(() => {
     if (terminal) {
-      console.log('Sending command to terminal:', inputCommand);
-      // Send the command with proper formatting and escaping
-      terminal.sendText(inputCommand);
-      // Send Enter to execute the command
-      terminal.sendText('\r');
+      console.log('Sending commands to terminal:', inputCommand);
+      
+      // Split commands by newlines and send them with delays
+      const commands = inputCommand.split('\n').filter(cmd => cmd.trim());
+      
+      commands.forEach((command, index) => {
+        setTimeout(() => {
+          if (terminal) {
+            console.log(`Sending command ${index + 1}:`, command);
+            terminal.sendText(command);
+            terminal.sendText('\r');
+          }
+        }, index * 2000); // 2 second delay between commands
+      });
     }
   }, 5000);
 }
@@ -388,7 +427,7 @@ async function testIndividualFunctions() {
     // Show function selection
     const functionItems = allFunctions.map(func => ({
       label: func.name,
-      description: `${func.contractName} - ${func.type}`,
+      description: `${func.contractName} - ${func.type} (${func.parameters.length} params)`,
       detail: func.signature,
       function: func
     }));
@@ -539,50 +578,57 @@ async function testFunction(func: FunctionInfo) {
 
     console.log('Parameter values:', parameterValues);
 
-    // Create test command and alternatives
-    const testCommand = createTestCommand(func, parameterValues);
-    const alternativeCommands = getAlternativeCommands(func, parameterValues);
-    console.log('Test command:', testCommand);
-    console.log('Alternative commands:', alternativeCommands);
+    // Read the original file to get the complete function definition
+    const originalFile = await workspace.openTextDocument(func.filePath);
+    const fileContent = originalFile.getText();
     
-    // Show the command to the user and let them choose
-    const action = await window.showInformationMessage(
-      `Test Command:\n${testCommand}\n\nAlternative Commands to try:\n${alternativeCommands.slice(1).map((cmd, i) => `${i + 2}. ${cmd}`).join('\n')}\n\nNote: If you get "unresolved contract" errors:\n1. Type "::help" in Clarinet console to see available contracts\n2. Type "::contracts" to list contracts\n3. Check the contract name in your Clarinet.toml file\n\nChoose an action:`,
-      'Open Console & Auto-Send',
-      'Open Console Only',
-      'Copy Command',
-      'Show All Commands',
-      'Show Help Commands'
-    );
-
-    if (action === 'Open Console & Auto-Send') {
-      await runClarinetCommandWithInput('clarinet console', testCommand);
-    } else if (action === 'Open Console Only') {
-      await runClarinetCommand('clarinet console');
-      // Show the command again after console opens
-      setTimeout(() => {
-        window.showInformationMessage(`Paste this command in the console:\n${testCommand}`);
-      }, 2000);
-    } else if (action === 'Copy Command') {
-      await env.clipboard.writeText(testCommand);
-      window.showInformationMessage('Command copied to clipboard!');
-    } else if (action === 'Show All Commands') {
-      const allCommands = alternativeCommands.join('\n');
-      await env.clipboard.writeText(allCommands);
-      window.showInformationMessage(`All commands copied to clipboard!\n\n${allCommands}`);
-    } else if (action === 'Show Help Commands') {
-      const helpCommands = [
-        '::help',
-        '::contracts',
-        '::mint',
-        '::mint-asset',
-        '::mint-token',
-        '::deploy',
-        '::deploy-contract'
-      ].join('\n');
-      await env.clipboard.writeText(helpCommands);
-      window.showInformationMessage(`Help commands copied to clipboard!\n\n${helpCommands}\n\nPaste these in the Clarinet console to discover available contracts.`);
+    // Extract the complete function definition
+    const functionCode = extractFunctionDefinition(fileContent, func);
+    
+    if (!functionCode) {
+      window.showErrorMessage(`Could not find function definition for ${func.name}`);
+      return;
     }
+
+    // Create a temporary .clar file with the function in the contracts directory
+    const contractsDir = pathJoin(workspace.workspaceFolders![0].uri.fsPath, 'contracts');
+    const tempFileName = `temp_test_${func.name}_${Date.now()}`;
+    const tempFilePath = pathJoin(contractsDir, `${tempFileName}.clar`);
+    const tempFileContent = createTempClarityFile(functionCode, func, parameterValues);
+    
+    // Ensure contracts directory exists
+    try {
+      await workspace.fs.createDirectory(Uri.file(contractsDir));
+    } catch (error) {
+      // Directory might already exist, ignore error
+    }
+    
+    await workspace.fs.writeFile(Uri.file(tempFilePath), Buffer.from(tempFileContent, 'utf8'));
+    console.log('Created temporary file:', tempFilePath);
+
+    // Execute the function definition first, then the test call
+    console.log('Executing function definition and test call...');
+    const functionDefinition = functionCode.trim();
+    const testCall = `(${func.name}${parameterValues.length > 0 ? ` ${parameterValues.join(' ')}` : ''})`;
+    
+    // Send function definition first and wait for it to complete
+    await sendToClarinetConsole(functionDefinition);
+    
+    // Wait for the function definition to be processed
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Then send the test call
+    await sendToClarinetConsole(testCall);
+    
+    // Clean up the temporary file after a delay
+    setTimeout(async () => {
+      try {
+        await workspace.fs.delete(Uri.file(tempFilePath));
+        console.log('Cleaned up temporary file:', tempFilePath);
+      } catch (error) {
+        console.error('Error cleaning up temporary file:', error);
+      }
+    }, 5000);
     
   } catch (error) {
     console.error('Error testing function:', error);
@@ -592,16 +638,23 @@ async function testFunction(func: FunctionInfo) {
 
 // Get parameter values from user
 async function getParameterValues(func: FunctionInfo): Promise<string[] | undefined> {
+  console.log('Getting parameter values for function:', func.name);
+  console.log('Function parameters:', func.parameters);
+  
   if (func.parameters.length === 0) {
     // No parameters, just run the function
+    console.log('No parameters found');
     return [];
   }
 
   const parameterValues: string[] = [];
   
-  for (const param of func.parameters) {
+  for (let i = 0; i < func.parameters.length; i++) {
+    const param = func.parameters[i];
+    console.log(`Getting value for parameter ${i + 1}/${func.parameters.length}:`, param);
+    
     const value = await window.showInputBox({
-      prompt: `Enter value for parameter: ${param.name} (${param.type})`,
+      prompt: `Enter value for parameter ${i + 1}/${func.parameters.length}: ${param.name} (${param.type})`,
       placeHolder: `e.g., ${getExampleValue(param.type)}`,
       validateInput: (value) => validateParameterValue(value, param.type)
     });
@@ -611,8 +664,10 @@ async function getParameterValues(func: FunctionInfo): Promise<string[] | undefi
     }
 
     parameterValues.push(value);
+    console.log(`Added parameter value: ${value}`);
   }
 
+  console.log('All parameter values:', parameterValues);
   return parameterValues;
 }
 
@@ -689,4 +744,88 @@ function getAlternativeCommands(func: FunctionInfo, parameterValues: string[]): 
     `(contract-call? .${func.contractName.toLowerCase()} ${func.name}${paramStr})`,
     `(contract-call? .${func.contractName.toUpperCase()} ${func.name}${paramStr})`
   ];
+}
+
+// Extract complete function definition from file content
+function extractFunctionDefinition(fileContent: string, func: FunctionInfo): string | null {
+  const lines = fileContent.split('\n');
+  let inFunction = false;
+  let braceCount = 0;
+  let functionLines: string[] = [];
+  let startLine = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    // Look for function definition start
+    if (!inFunction) {
+      const functionPattern = new RegExp(`\\(define-(public|private|read-only)\\s+\\(${func.name}\\s+`);
+      if (functionPattern.test(line)) {
+        inFunction = true;
+        startLine = i;
+        functionLines.push(line);
+        // Count opening braces in this line
+        braceCount += (line.match(/\{/g) || []).length;
+        braceCount -= (line.match(/\}/g) || []).length;
+        continue;
+      }
+    }
+    
+    if (inFunction) {
+      functionLines.push(line);
+      // Count braces to find the end of the function
+      braceCount += (line.match(/\{/g) || []).length;
+      braceCount -= (line.match(/\}/g) || []).length;
+      
+      // If we've closed all braces, we've found the end
+      if (braceCount === 0) {
+        break;
+      }
+    }
+  }
+
+  return inFunction ? functionLines.join('\n') : null;
+}
+
+// Send command directly to existing Clarinet console
+async function sendToClarinetConsole(command: string) {
+  const terminalName = 'Clarity Console';
+  let terminal = window.terminals.find(t => t.name === terminalName);
+  
+  if (!terminal) {
+    // Start Clarinet console if it doesn't exist
+    console.log('Starting Clarinet console...');
+    terminal = window.createTerminal(terminalName);
+    
+    // Check if a workspace is open
+    if (!workspace.workspaceFolders || workspace.workspaceFolders.length === 0) {
+      window.showErrorMessage('Open a Clarity project folder first.');
+      return;
+    }
+    
+    // Get Clarinet path from settings
+    const clarinetPath = workspace.getConfiguration('clarity').get('clarinetPath') as string;
+    const projectPath = workspace.workspaceFolders[0].uri.fsPath;
+    
+    // Start the console
+    terminal.sendText(`cd "${projectPath}" && ${clarinetPath} console`);
+    terminal.show();
+    
+    // Wait for console to start before sending commands
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+  
+  terminal.show();
+  console.log('Sending command to console:', command);
+  terminal.sendText(command);
+  terminal.sendText('\r');
+}
+
+// Create temporary Clarity file content
+function createTempClarityFile(functionCode: string, func: FunctionInfo, parameterValues: string[]): string {
+  const paramStr = parameterValues.length > 0 ? ` ${parameterValues.join(' ')}` : '';
+  const testCall = `(${func.name}${paramStr})`;
+  
+  // Return just the test call - the function should already be defined in the console
+  return testCall;
 }
